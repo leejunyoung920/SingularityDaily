@@ -74,7 +74,8 @@ def translate_text(text):
             "Return only the translation, with no explanation, no greetings, and no formatting.\n"
             f"Text to translate:\n{text}"
         )
-        response = model.generate_content(prompt)
+        request_options = {"timeout": 60}  # 60초 타임아웃
+        response = model.generate_content(prompt, request_options=request_options)
         return response.text.strip()
     except Exception as e:
         logging.error(f"⚠️ 번역 실패 (Gemini API): {e}")
@@ -96,7 +97,8 @@ def summarize_and_translate_body(text):
             "Return only the Korean summary, with no other explanations or greetings.\n\n"
             f"Text to summarize:\n{text}"
         )
-        response = model.generate_content(prompt)
+        request_options = {"timeout": 120}  # 요약은 더 길 수 있으므로 120초
+        response = model.generate_content(prompt, request_options=request_options)
         return response.text.strip()
     except Exception as e:
         logging.error(f"⚠️ 요약 실패 (Gemini API): {e}")

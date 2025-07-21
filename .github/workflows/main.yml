@@ -12,6 +12,7 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20 # 20분 이상 실행되면 작업을 강제로 중단합니다.
     permissions:
       contents: write # repository에 commit/push하기 위한 권한
       pages: write      # GitHub Pages에 배포하기 위한 권한
@@ -20,6 +21,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git-auto-commit-action이 전체 히스토리를 필요로 합니다.
 
       - name: Set up Python
         uses: actions/setup-python@v5

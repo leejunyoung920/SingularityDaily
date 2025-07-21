@@ -260,7 +260,11 @@ def main():
         logging.info(f"총 {len(all_paper_tasks)}개의 논문 항목을 병렬로 처리합니다...")
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_task = {executor.submit(process_paper_entry, task[0], task[1], task[2]): task for task in all_paper_tasks}
+            count = 0
+            total = len(future_to_task)
             for future in as_completed(future_to_task):
+                count += 1
+                logging.info(f"  - 논문 진행률: {count}/{total} 처리 완료...")
                 try:
                     future.result()
                 except Exception as exc:

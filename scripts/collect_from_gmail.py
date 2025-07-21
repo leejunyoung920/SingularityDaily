@@ -136,7 +136,12 @@ def main():
     # 이는 API 속도 제한을 어느 정도 제어하는 효과도 있습니다.
     with ThreadPoolExecutor(max_workers=5) as executor:
         future_to_task = {executor.submit(process_entry, task[0], task[1]): task for task in all_tasks}
+        
+        count = 0
+        total = len(future_to_task)
         for future in as_completed(future_to_task):
+            count += 1
+            logging.info(f"  - RSS 진행률: {count}/{total} 처리 완료...")
             task = future_to_task[future]
             try:
                 future.result()  # 작업 중 발생한 예외가 있다면 여기서 다시 발생시킵니다.

@@ -94,7 +94,6 @@ def write_mkdocs_yml(sections):
     config = {
         "site_name": "Singularity Daily",
         "site_url": "https://leejunyoung920.github.io/SingularityDaily/",
-        "repo_url": "https://github.com/leejunyoung920/SingularityDaily/",
         "theme": {
             "name": "material",
             "language": "ko",
