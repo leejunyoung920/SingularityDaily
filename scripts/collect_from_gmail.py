@@ -1,10 +1,10 @@
-# collect_from_gmail.py (RSS 방식으로 개선)
+# c:\MyProjects\SingularityDaily\scripts\collect_from_gmail.py
 import os
 import feedparser
 import logging
 from datetime import datetime
-from .common_utils import (
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from .common_utils import (
     clean_google_url,
     strip_html_tags,
     fetch_article_body,
@@ -31,7 +31,6 @@ RSS_FEEDS = {
 }
 MIN_BODY_LENGTH = 300
 MAX_ENTRIES_PER_FEED = 20
-API_RATE_LIMIT_DELAY = 1.5  # seconds
 OUTPUT_DIR = os.path.join("docs", "keywords")
 
 # --- Logging Setup ---
