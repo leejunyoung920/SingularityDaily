@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+myenv/
+
+# Credentials and local files (use GitHub Secrets instead)
+.env
+token.json
+credentials.json

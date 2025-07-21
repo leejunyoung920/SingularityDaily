@@ -1,0 +1,16 @@
+# Core data collection and processing
+feedparser
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+requests
+beautifulsoup4
+python-dotenv
+google-generativeai
+trafilatura
+pypdf
+
+# Website generation
+PyYAML
+mkdocs-material
+mkdocs-awesome-pages-plugin

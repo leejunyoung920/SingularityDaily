@@ -1,0 +1,55 @@
+name: Auto-collect and Deploy Site
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    # 3시간마다 실행 (UTC 기준)
+    - cron: '0 */3 * * *'
+  workflow_dispatch: # GitHub Actions 탭에서 수동 실행을 위한 옵션
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # repository에 commit/push하기 위한 권한
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create credentials from secrets
+        # GitHub Secrets에 저장된 인증 정보를 파일로 생성합니다.
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          CREDENTIALS_JSON: ${{ secrets.CREDENTIALS_JSON }}
+          TOKEN_JSON: ${{ secrets.TOKEN_JSON }}
+        run: |
+          echo "GOOGLE_API_KEY=${GOOGLE_API_KEY}" > .env
+          echo "${CREDENTIALS_JSON}" > credentials.json
+          echo "${TOKEN_JSON}" > token.json
+
+      - name: Run data collection and generate nav
+        run: |
+          python -m scripts.collect_from_gmail
+          python -m scripts.process_scholar_email
+          python -m scripts.generate_nav
+
+      - name: Commit and push changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: Auto-update collected content"
+          file_pattern: "docs/**/*.md mkdocs.yml seen_scholar_messages.json"
+
+      - name: Deploy to GitHub Pages
+        run: mkdocs gh-deploy --force
