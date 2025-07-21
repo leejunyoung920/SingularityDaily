@@ -57,6 +57,8 @@ jobs:
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
+          commit_user_name: "GitHub Actions Bot"
+          commit_user_email: "github-actions[bot]@users.noreply.github.com"
           commit_message: "chore: Auto-update collected content"
           file_pattern: "docs/**/*.md mkdocs.yml seen_scholar_messages.json"
 

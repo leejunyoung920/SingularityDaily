@@ -4,7 +4,7 @@ import os
 import re
 import base64
 import json
-from email.header import decode_header
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from bs4 import BeautifulSoup
 from google.auth.transport.requests import Request
@@ -178,6 +178,35 @@ def save_seen_ids(ids):
         json.dump(list(ids), f)
 
 
+def process_paper_entry(article, keyword, existing_titles):
+    """개별 논문 항목을 처리, 번역, 저장합니다."""
+    try:
+        title_en, link_url, snippet = article["title_en"], article["url"], article["snippet"]
+        logging.info(f"--- ⚙️ 처리 시작: {title_en} ---")
+
+        link = clean_google_url(link_url)
+
+        # 1. 본문 추출을 먼저 시도합니다.
+        body = fetch_article_body(link)
+
+        # 2. 본문 추출에 실패했거나 내용이 너무 짧으면, 이메일의 스니펫을 대체재로 사용합니다.
+        if not body or len(body.strip()) < MIN_BODY_LENGTH:
+            logging.info(f"  - ℹ️ 정보: 본문 추출 실패 또는 내용 부족. 이메일 스니펫을 사용합니다.")
+            body = snippet
+
+        # 3. 본문과 스니펫이 모두 비어있으면 건너뜁니다.
+        if not body or not body.strip():
+            logging.warning(f"본문/스니펫이 모두 비어있어 건너뜁니다: {title_en}")
+            return
+
+        title_ko, summary_ko = translate_text(title_en), summarize_and_translate_body(body)
+        if title_ko and summary_ko:
+            save_paper_markdown(keyword, title_ko, title_en, summary_ko, link, existing_titles)
+        else:
+            logging.error(f"번역 실패: {title_en}")
+    except Exception as e:
+        logging.error(f"논문 처리 중 오류 발생 ({article.get('title_en', 'N/A')}): {e}")
+
 def main():
     try:
         initialize_gemini()
@@ -201,54 +230,41 @@ def main():
 
     logging.info(f"총 {len(messages)}개의 새 알리미 메일을 발견했습니다.")
     seen_ids = load_seen_ids()
+    all_paper_tasks = []
     existing_titles_cache = {}  # 키워드별 기존 제목 캐시
 
     for msg_info in messages:
         msg_id = msg_info["id"]
         if msg_id in seen_ids:
             continue
-
+        
         msg = service.users().messages().get(userId="me", id=msg_id, format="full").execute()
         keyword, articles = parse_scholar_email(msg)
         if not articles:
+            # 논문이 없는 메일도 처리한 것으로 간주
+            seen_ids.add(msg_id)
             continue
 
         # 캐시를 사용하여 동일한 키워드에 대해 파일 시스템을 반복적으로 읽는 것을 방지합니다.
         if keyword not in existing_titles_cache:
             existing_titles_cache[keyword] = get_existing_titles(keyword)
-        existing_titles = existing_titles_cache[keyword]
-
-        logging.info(f"기존에 저장된 '{keyword}' 논문 {len(existing_titles)}개를 확인했습니다.")
 
         for article in articles:
-            title_en, link_url, snippet = article["title_en"], article["url"], article["snippet"]
-            logging.info(f"--- ⚙️ 처리 시작: {title_en} ---")
-
-            link = clean_google_url(link_url)
-            
-            # 1. 본문 추출을 먼저 시도합니다.
-            body = fetch_article_body(link)
-
-            # 2. 본문 추출에 실패했거나 내용이 너무 짧으면, 이메일의 스니펫을 대체재로 사용합니다.
-            if not body or len(body.strip()) < MIN_BODY_LENGTH:
-                logging.info(f"  - ℹ️ 정보: 본문 추출 실패 또는 내용 부족. 이메일 스니펫을 사용합니다.")
-                body = snippet
-
-            # 3. 본문과 스니펫이 모두 비어있으면 건너뜁니다.
-            if not body or not body.strip():
-                logging.warning(f"본문/스니펫이 모두 비어있어 건너뜁니다: {title_en}")
-                continue
-
-            title_ko = translate_text(title_en)
-            summary_ko = summarize_and_translate_body(body)
-            if title_ko and summary_ko:
-                save_paper_markdown(keyword, title_ko, title_en, summary_ko, link, existing_titles)
-            else:
-                logging.error(f"번역 실패: {title_en}")
+            all_paper_tasks.append((article, keyword, existing_titles_cache[keyword]))
 
         # 처리가 끝난 메일은 '읽음'으로 표시하고, seen 목록에 추가
         service.users().messages().modify(userId="me", id=msg_id, body={"removeLabelIds": ["UNREAD"]}).execute()
         seen_ids.add(msg_id)
+
+    if all_paper_tasks:
+        logging.info(f"총 {len(all_paper_tasks)}개의 논문 항목을 병렬로 처리합니다...")
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_task = {executor.submit(process_paper_entry, task[0], task[1], task[2]): task for task in all_paper_tasks}
+            for future in as_completed(future_to_task):
+                try:
+                    future.result()
+                except Exception as exc:
+                    logging.error(f"논문 처리 중 예외 발생: {exc}")
 
     save_seen_ids(seen_ids)
 
