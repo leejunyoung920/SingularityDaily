@@ -3,8 +3,8 @@ import os
 import feedparser
 import logging
 from datetime import datetime
-from time import sleep
 from .common_utils import (
+from concurrent.futures import ThreadPoolExecutor, as_completed
     clean_google_url,
     strip_html_tags,
     fetch_article_body,
@@ -12,6 +12,7 @@ from .common_utils import (
     is_duplicate_md,
     translate_text,
     summarize_and_translate_body,
+    initialize_gemini,
 )
 
 # --- Constants ---
@@ -104,8 +105,16 @@ def process_entry(entry, keyword):
 
 def main():
     """모든 RSS 피드를 순회하며 기사를 수집하고 저장합니다."""
+    try:
+        initialize_gemini()
+    except (ValueError, RuntimeError) as e:
+        logging.error(f"스크립트 실행 중단: {e}")
+        # CI/CD 환경에서 실패를 명확히 알리기 위해 0이 아닌 코드로 종료
+        exit(1)
+
+    all_tasks = []
     for keyword, feed_url in RSS_FEEDS.items():
-        logging.info(f"========== 🌐 RSS 수집 시작: {keyword} ==========")
+        logging.info(f"========== 🌐 RSS 피드 스캔 중: {keyword} ==========")
         try:
             feed = feedparser.parse(feed_url)
             if feed.bozo:
@@ -113,16 +122,29 @@ def main():
                 logging.warning(f"'{keyword}' 피드 파싱 문제: {feed.bozo_exception}")
 
             entries = feed.entries[:MAX_ENTRIES_PER_FEED]
-            logging.info(f"'{keyword}' 피드에서 {len(entries)}개의 항목을 발견했습니다.")
-
             for entry in entries:
-                process_entry(entry, keyword)
-                # API 호출 속도 제한을 위해 딜레이 추가
-                sleep(API_RATE_LIMIT_DELAY)
-
+                all_tasks.append((entry, keyword))
         except Exception as e:
-            logging.error(f"'{keyword}' 피드 처리 중 심각한 오류 발생: {e}")
-        logging.info(f"========== RSS 수집 종료: {keyword} ==========\n")
+            logging.error(f"'{keyword}' 피드 처리 중 오류 발생: {e}")
+
+    if not all_tasks:
+        logging.info("처리할 새 RSS 항목이 없습니다.")
+        return
+
+    logging.info(f"총 {len(all_tasks)}개의 RSS 항목을 병렬로 처리합니다...")
+
+    # max_workers를 5로 설정하여 동시에 5개의 항목을 처리합니다.
+    # 이는 API 속도 제한을 어느 정도 제어하는 효과도 있습니다.
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_task = {executor.submit(process_entry, task[0], task[1]): task for task in all_tasks}
+        for future in as_completed(future_to_task):
+            task = future_to_task[future]
+            try:
+                future.result()  # 작업 중 발생한 예외가 있다면 여기서 다시 발생시킵니다.
+            except Exception as exc:
+                logging.error(f"항목 처리 중 예외 발생 ({task[0].get('title', 'N/A')}): {exc}")
+
+    logging.info("========== RSS 수집 종료 ==========\n")
 
 if __name__ == "__main__":
     main()

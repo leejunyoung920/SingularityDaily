@@ -2,6 +2,8 @@
 import os
 import re
 import requests
+import logging
+import random
 import trafilatura
 from dotenv import load_dotenv
 import google.generativeai as genai
@@ -19,28 +21,26 @@ except ImportError:
     PYPDF_AVAILABLE = False
 
 
-# Gemini API 설정
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-# API가 이미 설정되었는지 확인하기 위한 플래그
-_gemini_configured = False
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36",
+]
 
-def _ensure_gemini_configured():
-    """Gemini API가 사용 전에 설정되었는지 확인합니다."""
-    global _gemini_configured
-    if _gemini_configured:
-        return True
-    
-    if not GOOGLE_API_KEY:
-        print("⚠️ API 호출 실패: GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다.")
-        return False
+def initialize_gemini():
+    """Gemini API를 초기화합니다. API 키가 없으면 예외를 발생시킵니다."""
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        # GitHub Actions 환경에서 이 오류는 보통 Secrets 설정 문제임을 의미합니다.
+        raise ValueError("API 초기화 실패: GOOGLE_API_KEY 환경 변수가 설정되지 않았거나 비어있습니다. GitHub Secrets를 확인해주세요.")
     
     try:
-        genai.configure(api_key=GOOGLE_API_KEY)
-        _gemini_configured = True
-        return True
+        genai.configure(api_key=api_key)
+        logging.info("✅ Gemini API가 성공적으로 초기화되었습니다.")
     except Exception as e:
-        print(f"⚠️ Gemini API 설정 실패: {e}")
-        return False
+        # 더 구체적인 에러로 변환하여 전파합니다.
+        raise RuntimeError(f"Gemini API 설정 실패: {e}") from e
 
 def strip_html_tags(text):
     return re.sub(r"<.*?>", "", text or "")
@@ -66,8 +66,6 @@ def translate_text(text):
     """Gemini API를 사용하여 텍스트를 한국어로 번역합니다."""
     if not text.strip():
         return ""
-    if not _ensure_gemini_configured():
-        return ""
 
     try:
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
@@ -79,15 +77,13 @@ def translate_text(text):
         response = model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
-        print(f"⚠️ 번역 실패 (Gemini API): {e}")
+        logging.error(f"⚠️ 번역 실패 (Gemini API): {e}")
         return ""
 
 
 def summarize_and_translate_body(text):
     """Gemini API를 사용하여 논문 본문을 더 긴 한국어 요약으로 생성합니다."""
     if not text.strip():
-        return ""
-    if not _ensure_gemini_configured():
         return ""
 
     try:
@@ -103,7 +99,7 @@ def summarize_and_translate_body(text):
         response = model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
-        print(f"⚠️ 요약 실패 (Gemini API): {e}")
+        logging.error(f"⚠️ 요약 실패 (Gemini API): {e}")
         return ""
 
 
@@ -111,7 +107,7 @@ def fetch_article_body(url, max_length=4000):
     """주어진 URL에서 기사/논문 본문을 추출합니다. HTML과 PDF를 지원하며, 추출 실패 시 대체 방법을 사용합니다."""
     try:
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': random.choice(USER_AGENTS)
         }
         response = requests.get(url, headers=headers, timeout=20)
         response.raise_for_status()
@@ -121,16 +117,16 @@ def fetch_article_body(url, max_length=4000):
         # PDF 처리
         if 'application/pdf' in content_type:
             if not PYPDF_AVAILABLE:
-                print(f"  - ⚠️ 경고: PDF 콘텐츠({url}) 발견, 하지만 'pypdf'가 설치되지 않아 건너뜁니다.")
+                logging.warning(f"  - PDF 콘텐츠({url}) 발견, 하지만 'pypdf'가 설치되지 않아 건너뜁니다.")
                 return None
             
-            print(f"  - ℹ️ 정보: PDF 콘텐츠 감지. 텍스트 추출 중... ({url})")
+            logging.info(f"  - PDF 콘텐츠 감지. 텍스트 추출 중... ({url})")
             with BytesIO(response.content) as pdf_file:
                 reader = PdfReader(pdf_file)
                 text = "".join(page.extract_text() or "" for page in reader.pages)
             
             if not text:
-                print(f"  - ⚠️ 경고: PDF에서 텍스트를 추출할 수 없습니다 ({url})")
+                logging.warning(f"  - PDF에서 텍스트를 추출할 수 없습니다 ({url})")
                 return None
             return text.strip()[:max_length]
 
@@ -138,20 +134,29 @@ def fetch_article_body(url, max_length=4000):
         article_text = trafilatura.extract(response.text, include_comments=False, include_tables=False)
         
         if not article_text:
-            print(f"  - ℹ️ 정보: trafilatura 실패. BeautifulSoup으로 대체합니다 ({url})")
+            logging.info(f"  - trafilatura 실패. BeautifulSoup으로 대체합니다 ({url})")
             soup = BeautifulSoup(response.text, "html.parser")
             article_tag = soup.find("article")
             if article_tag:
                 article_text = article_tag.get_text(separator='\n', strip=True)
 
         if not article_text:
-            print(f"⚠️ 본문 크롤 실패: 메인 콘텐츠를 추출할 수 없습니다 ({url})")
+            logging.warning(f"⚠️ 본문 크롤 실패: 메인 콘텐츠를 추출할 수 없습니다 ({url})")
             return None
             
         return article_text.strip()[:max_length]
 
+    except requests.exceptions.HTTPError as e:
+        logging.warning(f"HTTP 오류 ({e.response.status_code}) - URL: {url}")
+        return None
+    except requests.exceptions.ReadTimeout:
+        logging.warning(f"Read Timeout - URL: {url}")
+        return None
+    except requests.exceptions.ConnectionError as e:
+        logging.warning(f"Connection 오류 - URL: {url}")
+        return None
     except Exception as e:
-        print(f"⚠️ 본문 크롤 실패 (오류 발생): {url}: {e}")
+        logging.error(f"본문 크롤 중 예측하지 못한 오류 발생: {url}: {e}", exc_info=False)
         return None
 
 def is_duplicate_md(filepath, original_title):

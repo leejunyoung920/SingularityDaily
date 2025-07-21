@@ -5,7 +5,6 @@ import re
 import base64
 import json
 from email.header import decode_header
-from time import sleep
 
 from bs4 import BeautifulSoup
 from google.auth.transport.requests import Request
@@ -20,6 +19,7 @@ from .common_utils import (
     safe_filename,
     translate_text,
     summarize_and_translate_body,
+    initialize_gemini,
 )
 
 # --- Constants ---
@@ -179,6 +179,13 @@ def save_seen_ids(ids):
 
 
 def main():
+    try:
+        initialize_gemini()
+    except (ValueError, RuntimeError) as e:
+        logging.error(f"스크립트 실행 중단: {e}")
+        # CI/CD 환경에서 실패를 명확히 알리기 위해 0이 아닌 코드로 종료
+        exit(1)
+
     service = get_gmail_service()
     if not service:
         return
@@ -194,6 +201,7 @@ def main():
 
     logging.info(f"총 {len(messages)}개의 새 알리미 메일을 발견했습니다.")
     seen_ids = load_seen_ids()
+    existing_titles_cache = {}  # 키워드별 기존 제목 캐시
 
     for msg_info in messages:
         msg_id = msg_info["id"]
@@ -205,7 +213,11 @@ def main():
         if not articles:
             continue
 
-        existing_titles = get_existing_titles(keyword)
+        # 캐시를 사용하여 동일한 키워드에 대해 파일 시스템을 반복적으로 읽는 것을 방지합니다.
+        if keyword not in existing_titles_cache:
+            existing_titles_cache[keyword] = get_existing_titles(keyword)
+        existing_titles = existing_titles_cache[keyword]
+
         logging.info(f"기존에 저장된 '{keyword}' 논문 {len(existing_titles)}개를 확인했습니다.")
 
         for article in articles:
@@ -233,7 +245,6 @@ def main():
                 save_paper_markdown(keyword, title_ko, title_en, summary_ko, link, existing_titles)
             else:
                 logging.error(f"번역 실패: {title_en}")
-            sleep(API_RATE_LIMIT_DELAY)
 
         # 처리가 끝난 메일은 '읽음'으로 표시하고, seen 목록에 추가
         service.users().messages().modify(userId="me", id=msg_id, body={"removeLabelIds": ["UNREAD"]}).execute()
