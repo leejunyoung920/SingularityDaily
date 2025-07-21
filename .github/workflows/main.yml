@@ -43,6 +43,11 @@ jobs:
           printf '%s' "${CREDENTIALS_JSON}" > credentials.json
           printf '%s' "${TOKEN_JSON}" > token.json
 
+          echo "--- Verifying token.json content ---"
+          cat token.json
+          echo
+          echo "--- End of token.json content ---"
+
       - name: Run data collection and generate nav
         run: |
           python -m scripts.collect_from_gmail
