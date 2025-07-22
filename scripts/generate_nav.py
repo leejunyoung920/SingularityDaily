@@ -65,6 +65,18 @@ def collect_markdown_files():
             grouped_articles = group_files_by_date(md_file_paths)
             sections['기사'] = format_grouped_nav(grouped_articles)
 
+    # 2. '블로그' 섹션 처리 (docs/blog)
+    blog_path = DOCS_ROOT / "blog"
+    if blog_path.exists() and blog_path.is_dir():
+        md_file_paths = [
+            blog_path / f
+            for f in sorted(os.listdir(blog_path), reverse=True)
+            if f.endswith(".md") and f != "index.md"
+        ]
+        if md_file_paths:
+            grouped_posts = group_files_by_date(md_file_paths)
+            sections['블로그'] = format_grouped_nav(grouped_posts)
+
     # 2. '키워드' 섹션 처리 (docs/keywords)
     keywords_path = DOCS_ROOT / "keywords"
     if keywords_path.exists() and keywords_path.is_dir():
@@ -122,6 +134,9 @@ def write_mkdocs_yml(sections):
 
     if '기사' in sections:
         nav_structure.append({'기사': sections['기사']})
+
+    if '블로그' in sections:
+        nav_structure.append({'블로그': sections['블로그']})
 
     if '키워드' in sections:
         nav_structure.append({'키워드': sections['키워드']})
