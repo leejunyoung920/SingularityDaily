@@ -31,11 +31,23 @@ def group_files_by_date(file_paths):
             if month not in grouped[year]:
                 grouped[year][month] = []
 
-            title = shorten_title(file_path.stem)
-            rel_path = os.path.relpath(file_path, DOCS_ROOT)
-            grouped[year][month].append({title: str(rel_path).replace("\\", "/")})
+            # 최종 변환 전, 파일 경로 객체를 그대로 추가합니다.
+            grouped[year][month].append(file_path)
         except Exception as e:
             print(f"경고: 파일 처리 중 오류 발생 {file_path}: {e}")
+    
+    # 각 월별로 파일을 수정 시간순으로 정렬하고, 최종 형식으로 변환합니다.
+    for year in grouped:
+        for month in grouped[year]:
+            # 수정 시간(mtime)을 기준으로 내림차순 정렬 (최신 글이 위로)
+            grouped[year][month].sort(key=os.path.getmtime, reverse=True)
+            # 최종 내비게이션 형식으로 변환
+            sorted_files = []
+            for file_path in grouped[year][month]:
+                title = shorten_title(file_path.stem)
+                rel_path = os.path.relpath(file_path, DOCS_ROOT)
+                sorted_files.append({title: str(rel_path).replace("\\", "/")})
+            grouped[year][month] = sorted_files
     return grouped
 
 def format_grouped_nav(grouped_data):
@@ -109,6 +121,8 @@ def write_mkdocs_yml(sections):
         "theme": {
             "name": "material",
             "language": "ko",
+            "logo": "assets/logo.png",
+            "favicon": "assets/logo.png",
             "features": [
                 "navigation.instant",
                 "navigation.sections",
@@ -132,11 +146,11 @@ def write_mkdocs_yml(sections):
     # '홈' 링크를 맨 앞에 추가합니다. 사이트 제목과 별개로 명확한 '홈' 버튼을 제공합니다.
     nav_structure = [{'홈': 'index.md'}]
 
-    if '기사' in sections:
-        nav_structure.append({'기사': sections['기사']})
-
     if '블로그' in sections:
         nav_structure.append({'블로그': sections['블로그']})
+
+    if '기사' in sections:
+        nav_structure.append({'기사': sections['기사']})
 
     if '키워드' in sections:
         nav_structure.append({'키워드': sections['키워드']})
